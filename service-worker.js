@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studyhelp-shell-v4';
+const CACHE_NAME = 'studyhelp-shell-v5';
 const APP_FILES = ['./', './index.html', './style.css', './script.js', './manifest.json', './app-icon.svg', './app-icon-192.png', './app-icon-512.png'];
 
 self.addEventListener('install', event => {
@@ -23,5 +23,14 @@ self.addEventListener('fetch', event => {
     if (response.ok) { const copy = response.clone(); caches.open(CACHE_NAME).then(cache => cache.put(request, copy)); }
     return response;
   })));
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+    const app = clients.find(client => new URL(client.url).origin === self.location.origin);
+    if (app) return app.navigate(`${self.location.origin}/#tareas`).then(client => client.focus());
+    return self.clients.openWindow('/#tareas');
+  }));
 });
 
