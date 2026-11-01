@@ -28,7 +28,8 @@
   let isBreak = Boolean(savedPomodoro?.isBreak);
   let timerDeadline = savedPomodoro?.running && savedPomodoro.deadline ? Number(savedPomodoro.deadline) : null;
   let sessions = read('studyhelp-sesiones', []);
-  let preferences = read('studyhelp-preferencias', { notifications: false, sound: false });
+  let preferences = read('studyhelp-preferencias', { notifications: false, taskReminders: false, sound: false });
+  let weeklyGoals = read('studyhelp-metas-semanales', { tasks: 5, minutes: 300 });
   let timerAudioContext = null;
   let toastTimer;
   let toastUndoAction = null;
@@ -111,9 +112,9 @@
       write('studyhelp-perfil', nextProfile); profile = nextProfile; paintProfile(); $('#modal-perfil').close(); notify('Perfil actualizado.');
     } catch { notify('No se pudo procesar la imagen. Prueba con otra foto.'); }
   });
-  const backupKeys = ['studyhelp-tareas', 'studyhelp-resumenes', 'studyhelp-dudas', 'studyhelp-calificaciones', 'studyhelp-perfil', 'studyhelp-tema', 'studyhelp-sesiones', 'studyhelp-pomodoro', 'studyhelp-preferencias', 'studyhelp-tutorial', 'studyhelp-borrador-form-tarea', 'studyhelp-borrador-form-resumen', 'studyhelp-borrador-form-duda', 'studyhelp-borrador-form-calificacion'];
+  const backupKeys = ['studyhelp-tareas', 'studyhelp-resumenes', 'studyhelp-dudas', 'studyhelp-calificaciones', 'studyhelp-perfil', 'studyhelp-tema', 'studyhelp-sesiones', 'studyhelp-pomodoro', 'studyhelp-preferencias', 'studyhelp-metas-semanales', 'studyhelp-tutorial', 'studyhelp-borrador-form-tarea', 'studyhelp-borrador-form-resumen', 'studyhelp-borrador-form-duda', 'studyhelp-borrador-form-calificacion'];
   $('#exportar-datos').addEventListener('click', () => {
-    const backup = { app: 'StudyHelp', version: 1, exportedAt: new Date().toISOString(), data: Object.fromEntries(backupKeys.map(key => [key, read(key, null)])) };
+    const backup = { app: 'StudyHelp', version: 2, exportedAt: new Date().toISOString(), data: Object.fromEntries(backupKeys.map(key => [key, read(key, null)])) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = `studyhelp-copia-${todayISO()}.json`; link.click(); URL.revokeObjectURL(url); notify('Copia de seguridad descargada.');
   });
   $('#importar-datos').addEventListener('change', async event => {
@@ -127,6 +128,7 @@
       if ('studyhelp-perfil' in backup.data && backup.data['studyhelp-perfil'] !== null) { const importedProfile = backup.data['studyhelp-perfil']; if (typeof importedProfile !== 'object' || typeof importedProfile.name !== 'string' || (importedProfile.photo && !String(importedProfile.photo).startsWith('data:image/')) || (importedProfile.banner && !String(importedProfile.banner).startsWith('data:image/'))) throw new Error('La información del perfil no es válida.'); }
       if ('studyhelp-tema' in backup.data && backup.data['studyhelp-tema'] !== null && !['claro', 'oscuro'].includes(backup.data['studyhelp-tema'])) throw new Error('La preferencia de tema no es válida.');
       if ('studyhelp-preferencias' in backup.data && backup.data['studyhelp-preferencias'] !== null && typeof backup.data['studyhelp-preferencias'] !== 'object') throw new Error('Las preferencias de la copia no son válidas.');
+      if ('studyhelp-metas-semanales' in backup.data && backup.data['studyhelp-metas-semanales'] !== null) { const goal = backup.data['studyhelp-metas-semanales']; if (typeof goal !== 'object' || !Number.isFinite(Number(goal.tasks)) || !Number.isFinite(Number(goal.minutes))) throw new Error('Las metas de la copia no son válidas.'); }
       const previousData = Object.fromEntries(backupKeys.map(key => [key, localStorage.getItem(key)]));
       try { backupKeys.forEach(key => { if (key in backup.data) localStorage.setItem(key, JSON.stringify(backup.data[key])); }); }
       catch { backupKeys.forEach(key => { const old = previousData[key]; if (old === null) localStorage.removeItem(key); else localStorage.setItem(key, old); }); throw new Error('La copia no cabe en el espacio disponible de este navegador.'); }
@@ -149,7 +151,37 @@
     const studiedMinutes = sessions.reduce((total, item) => total + (Number(item.minutes) || 0), 0);
     const hours = Math.floor(studiedMinutes / 60); const minutes = studiedMinutes % 60;
     $('#tiempo-estudiado').textContent = `Tiempo enfocado: ${hours ? `${hours} h ` : ''}${minutes} min`;
+    renderWeeklyGoals();
   }
+
+  function weekRange(date = new Date()) {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    const end = new Date(start); end.setDate(end.getDate() + 6);
+    return { start: todayISO(start), end: todayISO(end), startDate: start, endDate: end };
+  }
+  function renderWeeklyGoals() {
+    const range = weekRange();
+    const tasksDone = tasks.filter(task => task.done && task.completedAt >= range.start && task.completedAt <= range.end).length;
+    const minutesStudied = sessions.filter(session => session.date >= range.start && session.date <= range.end).reduce((sum, session) => sum + (Number(session.minutes) || 0), 0);
+    const taskGoal = Math.min(100, Math.max(1, Number(weeklyGoals.tasks) || 5));
+    const minuteGoal = Math.min(10000, Math.max(15, Number(weeklyGoals.minutes) || 300));
+    const taskPercent = Math.min(100, Math.round(tasksDone / taskGoal * 100));
+    const minutePercent = Math.min(100, Math.round(minutesStudied / minuteGoal * 100));
+    $('#meta-tareas-semana').value = taskGoal; $('#meta-minutos-semana').value = minuteGoal;
+    $('#semana-actual-meta').textContent = `${new Intl.DateTimeFormat('es-EC', { day: 'numeric', month: 'short' }).format(range.startDate)} – ${new Intl.DateTimeFormat('es-EC', { day: 'numeric', month: 'short' }).format(range.endDate)}`;
+    $('#progreso-tareas-semana').textContent = `${tasksDone} de ${taskGoal}`;
+    $('#barra-meta-tareas').style.width = `${taskPercent}%`;
+    $('#barra-meta-tareas').parentElement.setAttribute('aria-valuenow', String(taskPercent));
+    $('#progreso-minutos-semana').textContent = `${minutesStudied} de ${minuteGoal} min`;
+    $('#barra-meta-minutos').style.width = `${minutePercent}%`;
+    $('#barra-meta-minutos').parentElement.setAttribute('aria-valuenow', String(minutePercent));
+  }
+  $('#form-metas-semanales').addEventListener('submit', event => {
+    event.preventDefault();
+    weeklyGoals = { tasks: Math.min(100, Math.max(1, Number($('#meta-tareas-semana').value) || 5)), minutes: Math.min(10000, Math.max(15, Number($('#meta-minutos-semana').value) || 300)) };
+    write('studyhelp-metas-semanales', weeklyGoals); renderWeeklyGoals(); notify('Metas semanales guardadas.');
+  });
 
   function renderProgress() {
     const total = tasks.length;
@@ -222,6 +254,8 @@
     renderStreak();
     renderProgress();
     renderHomeQueue();
+    updateNotificationBadge();
+    checkTaskReminders();
   }
 
   function editTask(task) {
@@ -248,7 +282,36 @@
     write('studyhelp-tareas', tasks); clearTaskEditor(); renderTasks(); renderAgenda(); notify(id ? 'Tarea actualizada.' : 'Tarea agregada a tu plan.');
   });
   $('#cancelar-edicion-tarea').addEventListener('click', clearTaskEditor);
-  $('#ver-notificaciones').addEventListener('click', () => { const overdue = tasks.filter(task => !task.done && task.date && task.date < todayISO()).length; const dueToday = tasks.filter(task => !task.done && task.date === todayISO()).length; const dueTomorrow = new Date(); dueTomorrow.setDate(dueTomorrow.getDate() + 1); const tomorrowCount = tasks.filter(task => !task.done && task.date === todayISO(dueTomorrow)).length; const parts = []; if (overdue) parts.push(`${overdue} vencida${overdue === 1 ? '' : 's'}`); if (dueToday) parts.push(`${dueToday} para hoy`); if (tomorrowCount) parts.push(`${tomorrowCount} para mañana`); notify(parts.length ? `Avisos: ${parts.join(', ')}.` : 'No tienes tareas vencidas ni entregas próximas.'); });
+  function actionableTasks() {
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    return tasks.filter(task => !task.done && task.date && task.date <= todayISO(tomorrow)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  }
+  function updateNotificationBadge() {
+    const due = actionableTasks(); const badge = $('#contador-avisos');
+    badge.hidden = due.length === 0; badge.textContent = String(Math.min(99, due.length));
+    $('#ver-notificaciones').title = due.length ? `${due.length} tarea${due.length === 1 ? '' : 's'} vencida${due.length === 1 ? '' : 's o próximas'}` : 'Avisos de tareas';
+  }
+  function checkTaskReminders() {
+    if (!preferences.taskReminders || !('Notification' in window) || Notification.permission !== 'granted') return;
+    const due = actionableTasks(); if (!due.length) return;
+    const sent = read('studyhelp-avisos-enviados', []);
+    const reminderKey = `${todayISO()}:${due.map(task => task.id).sort().join(',')}`;
+    if (sent.includes(reminderKey)) return;
+    const overdueCount = due.filter(task => task.date < todayISO()).length;
+    const dueTodayCount = due.filter(task => task.date === todayISO()).length;
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowCount = due.filter(task => task.date === todayISO(tomorrow)).length;
+    const summary = [overdueCount && `${overdueCount} vencida${overdueCount === 1 ? '' : 's'}`, dueTodayCount && `${dueTodayCount} para hoy`, tomorrowCount && `${tomorrowCount} para mañana`].filter(Boolean).join(' · ');
+    const options = { body: `${summary}. ${due.slice(0, 2).map(task => task.text).join(' · ')}${due.length > 2 ? '…' : ''}`, icon: 'app-icon.svg', tag: 'studyhelp-tareas-proximas' };
+    if ('serviceWorker' in navigator) navigator.serviceWorker.ready.then(registration => registration.showNotification('StudyHelp: tareas próximas', options)).catch(() => {});
+    else { const notification = new Notification('StudyHelp: tareas próximas', options); notification.onclick = () => { window.focus(); showView('tareas'); notification.close(); }; }
+    const currentDay = todayISO(); write('studyhelp-avisos-enviados', [...sent.filter(item => item.startsWith(`${currentDay}:`)), reminderKey]);
+  }
+  $('#ver-notificaciones').addEventListener('click', () => {
+    const due = actionableTasks();
+    notify(due.length ? `Tareas por atender: ${due.slice(0, 2).map(task => task.text).join(' · ')}${due.length > 2 ? ` y ${due.length - 2} más` : ''}.` : 'No tienes tareas vencidas ni entregas próximas.');
+    if (due.length) showView('tareas');
+  });
   $('#orden-tareas').addEventListener('change', () => { taskSort = $('#orden-tareas').value; expandedTasks = true; renderTasks(); });
   $('#buscar-tarea').addEventListener('input', renderTasks); $('#filtrar-materia-tarea').addEventListener('change', renderTasks);
   $('#ver-tareas').addEventListener('click', () => { expandedTasks = !expandedTasks; renderTasks(); });
@@ -470,8 +533,23 @@
   ['duracion-estudio', 'duracion-descanso'].forEach(id => $(`#${id}`).addEventListener('change', () => $('#reiniciar-pomodoro').click()));
   $('#duracion-estudio').value = studyMinutes; $('#duracion-descanso').value = breakMinutes;
   if (savedPomodoro?.running && timerDeadline) { pomodoroSeconds = Math.max(0, Math.ceil((timerDeadline - Date.now()) / 1000)); if (pomodoroSeconds <= 0) finishTimer(); else startTimer(); }
-  $('#activar-notificaciones').checked = Boolean(preferences.notifications && 'Notification' in window && Notification.permission === 'granted'); $('#sonido-temporizador').checked = Boolean(preferences.sound);
+  $('#activar-notificaciones').checked = Boolean(preferences.notifications && 'Notification' in window && Notification.permission === 'granted');
+  $('#activar-avisos-tareas').checked = Boolean(preferences.taskReminders && 'Notification' in window && Notification.permission === 'granted');
+  $('#sonido-temporizador').checked = Boolean(preferences.sound);
   $('#activar-notificaciones').addEventListener('change', async event => { if (event.target.checked && 'Notification' in window) { let permission = 'denied'; try { permission = await Notification.requestPermission(); } catch {} if (permission !== 'granted') { event.target.checked = false; preferences.notifications = false; notify('El navegador no autorizó las notificaciones.'); } else preferences.notifications = true; } else if (event.target.checked) { event.target.checked = false; preferences.notifications = false; notify('Este navegador no admite notificaciones.'); } else preferences.notifications = false; write('studyhelp-preferencias', preferences); });
+  $('#activar-avisos-tareas').addEventListener('change', async event => {
+    if (event.target.checked && 'Notification' in window) {
+      let permission = Notification.permission;
+      if (permission === 'default') { try { permission = await Notification.requestPermission(); } catch {} }
+      if (permission !== 'granted') { event.target.checked = false; preferences.taskReminders = false; notify('El navegador no autorizó los avisos. Puedes activarlos desde los permisos del sitio.'); }
+      else { preferences.taskReminders = true; notify('Avisos de tareas activados. StudyHelp te avisará mientras esté abierto.'); }
+    } else if (event.target.checked) { event.target.checked = false; preferences.taskReminders = false; notify('Este navegador no admite notificaciones.'); }
+    else preferences.taskReminders = false;
+    write('studyhelp-preferencias', preferences); checkTaskReminders();
+  });
+  window.addEventListener('focus', checkTaskReminders);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkTaskReminders(); });
+  setInterval(checkTaskReminders, 30 * 60 * 1000);
   $('#sonido-temporizador').addEventListener('change', async event => { preferences.sound = event.target.checked; if (preferences.sound) { try { timerAudioContext ||= new (window.AudioContext || window.webkitAudioContext)(); await timerAudioContext.resume(); } catch {} } write('studyhelp-preferencias', preferences); });
 
   // Búsqueda global por tareas, apuntes y preguntas.
