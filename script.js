@@ -10,7 +10,6 @@
   let tasks = read('studyhelp-tareas', []);
   let summaries = read('studyhelp-resumenes', []);
   let questions = read('studyhelp-dudas', []);
-  let aiConversation = read('studyhelp-chat-ia', []);
   let grades = read('studyhelp-calificaciones', []);
   let profile = read('studyhelp-perfil', { name: 'Estudiante', photo: '' });
   let profileCoverPreviewUrl = null;
@@ -44,7 +43,7 @@
   function showView(view) {
     $$('.page-view').forEach(page => page.classList.toggle('active', page.dataset.view === view));
     $$('.nav-link').forEach(link => link.classList.toggle('active', link.dataset.section === view));
-    const names = { inicio: 'Inicio', dudas: 'Resolver dudas', tutor: 'Tutor IA', resumenes: 'Crear resúmenes', tareas: 'Organizar tareas', agenda: 'Agenda semanal', calificaciones: 'Mis calificaciones' };
+    const names = { inicio: 'Inicio', dudas: 'Resolver dudas', resumenes: 'Crear resúmenes', tareas: 'Organizar tareas', agenda: 'Agenda semanal', calificaciones: 'Mis calificaciones' };
     $('.breadcrumb strong').textContent = names[view] || 'Inicio';
     $('#barra-lateral').classList.remove('open');
     history.replaceState(null, '', `#${view}`); window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -55,7 +54,7 @@
   $$('[data-ir]').forEach(button => button.addEventListener('click', () => showView(button.dataset.ir)));
   $('#menu-movil').addEventListener('click', () => $('#barra-lateral').classList.toggle('open'));
   const initialView = location.hash.slice(1);
-  showView(['inicio', 'dudas', 'tutor', 'resumenes', 'tareas', 'agenda', 'calificaciones'].includes(initialView) ? initialView : 'inicio');
+  showView(['inicio', 'dudas', 'resumenes', 'tareas', 'agenda', 'calificaciones'].includes(initialView) ? initialView : 'inicio');
 
   // Tema y perfil local.
   const theme = read('studyhelp-tema', 'claro');
@@ -112,7 +111,7 @@
       write('studyhelp-perfil', nextProfile); profile = nextProfile; paintProfile(); $('#modal-perfil').close(); notify('Perfil actualizado.');
     } catch { notify('No se pudo procesar la imagen. Prueba con otra foto.'); }
   });
-  const backupKeys = ['studyhelp-tareas', 'studyhelp-resumenes', 'studyhelp-dudas', 'studyhelp-chat-ia', 'studyhelp-calificaciones', 'studyhelp-perfil', 'studyhelp-tema', 'studyhelp-sesiones', 'studyhelp-pomodoro', 'studyhelp-preferencias', 'studyhelp-tutorial', 'studyhelp-borrador-form-tarea', 'studyhelp-borrador-form-resumen', 'studyhelp-borrador-form-duda', 'studyhelp-borrador-form-calificacion'];
+  const backupKeys = ['studyhelp-tareas', 'studyhelp-resumenes', 'studyhelp-dudas', 'studyhelp-calificaciones', 'studyhelp-perfil', 'studyhelp-tema', 'studyhelp-sesiones', 'studyhelp-pomodoro', 'studyhelp-preferencias', 'studyhelp-tutorial', 'studyhelp-borrador-form-tarea', 'studyhelp-borrador-form-resumen', 'studyhelp-borrador-form-duda', 'studyhelp-borrador-form-calificacion'];
   $('#exportar-datos').addEventListener('click', () => {
     const backup = { app: 'StudyHelp', version: 1, exportedAt: new Date().toISOString(), data: Object.fromEntries(backupKeys.map(key => [key, read(key, null)])) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = `studyhelp-copia-${todayISO()}.json`; link.click(); URL.revokeObjectURL(url); notify('Copia de seguridad descargada.');
@@ -123,7 +122,7 @@
       if (file.size > 20 * 1024 * 1024) throw new Error('La copia supera el límite de 20 MB.');
       const backup = JSON.parse(await file.text()); if (backup.app !== 'StudyHelp' || !backup.data || typeof backup.data !== 'object') throw new Error('El archivo no es una copia de StudyHelp.');
       if (!window.confirm('Importar esta copia reemplazará tus datos actuales de StudyHelp en este navegador. ¿Continuar?')) return;
-      const arrayKeys = ['studyhelp-tareas', 'studyhelp-resumenes', 'studyhelp-dudas', 'studyhelp-chat-ia', 'studyhelp-calificaciones', 'studyhelp-sesiones'];
+      const arrayKeys = ['studyhelp-tareas', 'studyhelp-resumenes', 'studyhelp-dudas', 'studyhelp-calificaciones', 'studyhelp-sesiones'];
       arrayKeys.forEach(key => { const value = backup.data[key]; if (key in backup.data && value !== null && (!Array.isArray(value) || value.some(item => !item || typeof item !== 'object'))) throw new Error('La copia tiene una sección dañada.'); });
       if ('studyhelp-perfil' in backup.data && backup.data['studyhelp-perfil'] !== null) { const importedProfile = backup.data['studyhelp-perfil']; if (typeof importedProfile !== 'object' || typeof importedProfile.name !== 'string' || (importedProfile.photo && !String(importedProfile.photo).startsWith('data:image/')) || (importedProfile.banner && !String(importedProfile.banner).startsWith('data:image/'))) throw new Error('La información del perfil no es válida.'); }
       if ('studyhelp-tema' in backup.data && backup.data['studyhelp-tema'] !== null && !['claro', 'oscuro'].includes(backup.data['studyhelp-tema'])) throw new Error('La preferencia de tema no es válida.');
@@ -491,55 +490,6 @@
   $('#abrir-busqueda').addEventListener('click', openGlobalSearch); $('#cerrar-busqueda').addEventListener('click', () => $('#modal-busqueda').close()); $('#busqueda-global').addEventListener('input', renderGlobalSearch);
   document.addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openGlobalSearch(); } });
 
-  // Tutor de IA: las credenciales solo existen en el servidor; el historial queda en este navegador.
-  function addAiAnswerToDoubts(question, answer, subject) {
-    questions.unshift({ id: crypto.randomUUID(), question, answer, subject: subject === 'General' ? 'Otra' : subject, reviewed: false, created: new Date().toISOString(), source: 'tutor-ia' });
-    write('studyhelp-dudas', questions); renderQuestions(); notify('Respuesta guardada en tu cuaderno de dudas.');
-  }
-  function renderTutorChat() {
-    const chat = $('#chat-tutor'); chat.replaceChildren();
-    if (!aiConversation.length) { const welcome = document.createElement('div'); welcome.className = 'ai-welcome'; const icon = document.createElement('span'); icon.className = 'ai-avatar'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = '✦'; const title = document.createElement('strong'); title.textContent = 'Hola, soy tu tutor de estudio.'; const text = document.createElement('p'); text.textContent = 'Cuéntame qué tema estás estudiando y te ayudaré a entenderlo.'; welcome.append(icon, title, text); chat.append(welcome); return; }
-    aiConversation.forEach((message, index) => {
-      const article = document.createElement('article'); article.className = `ai-message ${message.role === 'assistant' ? 'ai-response' : 'ai-question'}`;
-      const heading = document.createElement('strong'); heading.textContent = message.role === 'assistant' ? 'Tutor IA' : 'Tú';
-      const content = document.createElement('div'); content.className = 'ai-message-content';
-      if (message.role === 'assistant') renderNoteMarkdown(message.content, content); else content.textContent = message.content;
-      article.append(heading, content);
-      if (message.role === 'assistant' && index > 0 && aiConversation[index - 1].role === 'user') { const save = document.createElement('button'); save.type = 'button'; save.className = 'text-button'; save.textContent = 'Guardar en mis dudas'; save.addEventListener('click', () => addAiAnswerToDoubts(aiConversation[index - 1].content, message.content, message.subject || aiConversation[index - 1].subject || 'General')); article.append(save); }
-      chat.append(article);
-    });
-    chat.scrollTop = chat.scrollHeight;
-  }
-  $('#form-tutor').addEventListener('submit', async event => {
-    event.preventDefault(); const question = $('#mensaje-tutor').value.trim(); if (!question) return;
-    const subject = $('#materia-tutor').value; aiConversation.push({ role: 'user', content: question, subject, created: new Date().toISOString() });
-    write('studyhelp-chat-ia', aiConversation); renderTutorChat(); $('#mensaje-tutor').value = ''; $('#enviar-tutor').disabled = true; $('#mensaje-tutor').disabled = true; $('#estado-tutor').textContent = 'El tutor está preparando una explicación…';
-    try {
-      const response = await fetch('/api/tutor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject, messages: aiConversation.slice(-8).map(({ role, content }) => ({ role, content })) }) });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'No se pudo obtener una respuesta.');
-      aiConversation.push({ role: 'assistant', content: payload.answer, subject, created: new Date().toISOString() }); write('studyhelp-chat-ia', aiConversation); renderTutorChat(); $('#estado-tutor').textContent = '';
-    } catch (error) { $('#estado-tutor').textContent = error.message === 'Failed to fetch' ? 'No se pudo conectar con el servidor. Comprueba que StudyHelp esté abierto desde localhost y vuelve a intentar.' : error.message; }
-    finally { $('#enviar-tutor').disabled = false; $('#mensaje-tutor').disabled = false; $('#mensaje-tutor').focus(); }
-  });
-  $$('[data-pregunta-sugerida]').forEach(button => button.addEventListener('click', () => { $('#mensaje-tutor').value = button.dataset.preguntaSugerida; $('#mensaje-tutor').focus(); $('#mensaje-tutor').setSelectionRange($('#mensaje-tutor').value.length, $('#mensaje-tutor').value.length); }));
-  $('#limpiar-chat').addEventListener('click', () => { if (!aiConversation.length || !window.confirm('¿Borrar esta conversación de este navegador?')) return; aiConversation = []; write('studyhelp-chat-ia', aiConversation); renderTutorChat(); $('#estado-tutor').textContent = ''; });
-  async function checkTutorConfiguration() {
-    try {
-      const response = await fetch('/api/tutor/status'); const status = await response.json();
-      let message;
-      if (status.configured) message = `${status.provider === 'ollama' ? 'Tutor IA local' : 'Tutor IA en línea'} listo${status.model ? ` (${status.model})` : ''}. Puedes enviar tu pregunta.`;
-      else if (status.provider === 'gemini') message = 'Falta agregar GEMINI_API_KEY en Environment del servicio de Render. No pongas la clave en GitHub ni en esta página.';
-      else if (status.provider === 'openai') message = 'Falta configurar OPENAI_API_KEY como variable secreta del servidor.';
-      else if (status.ollamaRunning) message = `Ollama está activo, pero falta descargar ${status.model}. Abre PowerShell y ejecuta: ollama run ${status.model}`;
-      else message = 'Ollama no está disponible. En la versión de Render configura una clave de Gemini; para usarlo localmente, abre Ollama y sigue CONFIGURAR-IA.md.';
-      $('#estado-configuracion-ia').textContent = message;
-      $('#estado-configuracion-ia').classList.toggle('ai-ready', Boolean(status.configured));
-    }
-    catch { $('#estado-configuracion-ia').textContent = 'No se pudo conectar con el servidor de StudyHelp. Abre la página desde localhost y reinicia el servidor si acabas de configurarlo.'; }
-  }
-  checkTutorConfiguration();
-
   // Tarjetas de repaso a partir de las dudas guardadas por el estudiante.
   let cardIndex = 0; let cardAnswerVisible = false;
   function renderFlashcard() { if (!questions.length) return; const item = questions[cardIndex % questions.length]; $('#contador-tarjeta').textContent = `Tarjeta ${cardIndex + 1} de ${questions.length} · ${item.subject || 'Otra materia'}`; $('#tarjeta-repaso').textContent = cardAnswerVisible ? (item.answer || 'No escribiste una respuesta todavía. Piensa en la explicación y añádela al editar la duda.') : item.question; $('#tarjeta-voltear').textContent = cardAnswerVisible ? 'Ver pregunta' : 'Ver respuesta'; $('#tarjeta-repasada').textContent = item.reviewed ? 'Ya repasada ✓' : 'Marcar repasada'; }
@@ -551,7 +501,7 @@
   // Tutorial breve para la primera visita.
   const tutorialSteps = [
     ['Organiza tu semana', 'Crea tareas con fecha, prioridad y materia. La agenda te ayuda a ver qué sigue.'],
-    ['Guarda lo que aprendes', 'Crea apuntes y dudas, relaciónalos con tus evaluaciones y consulta al Tutor IA para entender mejor tus temas.'],
+    ['Guarda lo que aprendes', 'Crea apuntes y dudas, relaciónalos con tus evaluaciones y repasa lo aprendido.'],
     ['Estudia a tu ritmo', 'Usa el Pomodoro, registra tus calificaciones y descarga una copia de seguridad desde tu perfil.']
   ];
   let tutorialIndex = 0;
@@ -585,7 +535,7 @@
 
   const dateLabel = new Intl.DateTimeFormat('es-EC', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
   $('#fecha-hoy').textContent = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
-  paintTimer(); renderTasks(); renderSummaries(); renderAgenda(); renderQuestions(); renderGrades(); updateWordCount(); renderTutorChat();
+  paintTimer(); renderTasks(); renderSummaries(); renderAgenda(); renderQuestions(); renderGrades(); updateWordCount();
   if (!read('studyhelp-tutorial', null)) { paintTutorial(); openDialog($('#modal-tutorial')); }
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('./service-worker.js').catch(() => {});
 })();
