@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studyhelp-shell-v3';
+const CACHE_NAME = 'studyhelp-shell-v4';
 const APP_FILES = ['./', './index.html', './style.css', './script.js', './manifest.json', './app-icon.svg', './app-icon-192.png', './app-icon-512.png'];
 
 self.addEventListener('install', event => {
