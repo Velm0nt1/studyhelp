@@ -1,0 +1,10 @@
+{
+  "name": "studyhelp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Página educativa StudyHelp",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
+
