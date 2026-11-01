@@ -525,7 +525,17 @@
   $$('[data-pregunta-sugerida]').forEach(button => button.addEventListener('click', () => { $('#mensaje-tutor').value = button.dataset.preguntaSugerida; $('#mensaje-tutor').focus(); $('#mensaje-tutor').setSelectionRange($('#mensaje-tutor').value.length, $('#mensaje-tutor').value.length); }));
   $('#limpiar-chat').addEventListener('click', () => { if (!aiConversation.length || !window.confirm('¿Borrar esta conversación de este navegador?')) return; aiConversation = []; write('studyhelp-chat-ia', aiConversation); renderTutorChat(); $('#estado-tutor').textContent = ''; });
   async function checkTutorConfiguration() {
-    try { const response = await fetch('/api/tutor/status'); const status = await response.json(); const message = status.configured ? `Tutor IA local listo (${status.model}). Puedes enviar tu pregunta.` : status.ollamaRunning ? `Ollama está activo, pero falta descargar ${status.model}. Abre PowerShell y ejecuta: ollama run ${status.model}` : 'Para usar el Tutor IA sin pagar ni crear claves, instala Ollama y sigue los pasos de CONFIGURAR-IA.md.'; $('#estado-configuracion-ia').textContent = status.configured ? message : status.provider === 'openai' ? 'Falta configurar la clave de OpenAI en el servidor. Sigue CONFIGURAR-IA.md y no pegues la clave aquí.' : message; $('#estado-configuracion-ia').classList.toggle('ai-ready', Boolean(status.configured)); }
+    try {
+      const response = await fetch('/api/tutor/status'); const status = await response.json();
+      let message;
+      if (status.configured) message = `${status.provider === 'ollama' ? 'Tutor IA local' : 'Tutor IA en línea'} listo${status.model ? ` (${status.model})` : ''}. Puedes enviar tu pregunta.`;
+      else if (status.provider === 'gemini') message = 'Falta agregar GEMINI_API_KEY en Environment del servicio de Render. No pongas la clave en GitHub ni en esta página.';
+      else if (status.provider === 'openai') message = 'Falta configurar OPENAI_API_KEY como variable secreta del servidor.';
+      else if (status.ollamaRunning) message = `Ollama está activo, pero falta descargar ${status.model}. Abre PowerShell y ejecuta: ollama run ${status.model}`;
+      else message = 'Ollama no está disponible. En la versión de Render configura una clave de Gemini; para usarlo localmente, abre Ollama y sigue CONFIGURAR-IA.md.';
+      $('#estado-configuracion-ia').textContent = message;
+      $('#estado-configuracion-ia').classList.toggle('ai-ready', Boolean(status.configured));
+    }
     catch { $('#estado-configuracion-ia').textContent = 'No se pudo conectar con el servidor de StudyHelp. Abre la página desde localhost y reinicia el servidor si acabas de configurarlo.'; }
   }
   checkTutorConfiguration();

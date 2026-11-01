@@ -11,6 +11,7 @@ if (fs.existsSync(envPath)) {
     if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^(["'])(.*)\1$/, '$2');
   }
 }
+const getAIProvider = () => (process.env.AI_PROVIDER || (process.env.RENDER ? 'gemini' : 'ollama')).toLowerCase();
 const types = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -42,37 +43,53 @@ async function handleTutor(request, response) {
     if (!Array.isArray(input.messages) || input.messages.length < 1 || input.messages.length > 8 || input.messages.some(message => !message || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string' || message.content.length > 4_000) || input.messages.reduce((length, message) => length + message.content.length, 0) > 16_000 || input.messages.at(-1)?.role !== 'user') {
       return sendJSON(response, 400, { error: 'Escribe una pregunta válida para continuar.' });
     }
-    const provider = (process.env.AI_PROVIDER || 'ollama').toLowerCase();
+    const provider = getAIProvider();
     if (provider === 'openai' && !process.env.OPENAI_API_KEY) return sendJSON(response, 503, { error: 'Falta configurar OPENAI_API_KEY en el archivo .env del servidor. La clave nunca va en el navegador.' });
-    if (!['ollama', 'openai'].includes(provider)) return sendJSON(response, 503, { error: 'Proveedor de IA no válido. Usa ollama u openai en .env.' });
+    if (provider === 'gemini' && !process.env.GEMINI_API_KEY) return sendJSON(response, 503, { error: 'Falta añadir GEMINI_API_KEY en las variables Environment del servicio de Render. No pongas la clave en la página ni en GitHub.' });
+    if (!['ollama', 'openai', 'gemini'].includes(provider)) return sendJSON(response, 503, { error: 'Proveedor de IA no válido. Usa ollama, gemini u openai.' });
 
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 45_000); timeout.unref?.();
-    let apiResponse;
+    let apiResponse; let isOllama = provider === 'ollama';
+    const systemInstruction = `Eres Tutor IA de StudyHelp, una plataforma educativa en español. Materia seleccionada: ${String(input.subject || 'General').slice(0, 50)}. Explica con claridad y paciencia para un estudiante. Guía paso a paso, usa ejemplos breves y pregunta si quiere practicar. No inventes datos; si no sabes algo, dilo. Para ejercicios, ayuda a razonar y explica el procedimiento. Usa Markdown sencillo cuando ayude.`;
     try {
-      const isOllama = provider === 'ollama';
-      const messages = [
-        { role: 'system', content: `Eres Tutor IA de StudyHelp, una plataforma educativa en español. Materia seleccionada: ${String(input.subject || 'General').slice(0, 50)}. Explica con claridad y paciencia para un estudiante. Guía paso a paso, usa ejemplos breves y pregunta si quiere practicar. No inventes datos; si no sabes algo, dilo. Para ejercicios, ayuda a razonar y explica el procedimiento. Usa Markdown sencillo cuando ayude.` },
-        ...input.messages.map(message => ({ role: message.role, content: message.content }))
-      ];
-      apiResponse = await fetch(isOllama ? `${process.env.OLLAMA_URL || 'http://127.0.0.1:11434'}/v1/chat/completions` : 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST', signal: controller.signal,
-        headers: { ...(isOllama ? {} : { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` }), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: isOllama ? (process.env.OLLAMA_MODEL || 'qwen3:1.7b') : (process.env.OPENAI_MODEL || 'gpt-6-astra'),
-          messages,
-          max_tokens: 800,
-          ...(isOllama ? {} : { store: false })
-        })
-      });
+      if (provider === 'gemini') {
+        const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+        apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST', signal: controller.signal,
+          headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            contents: input.messages.map(message => ({ role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text: message.content }] })),
+            generationConfig: { maxOutputTokens: 800 }
+          })
+        });
+      } else {
+        const messages = [
+          { role: 'system', content: systemInstruction },
+          ...input.messages.map(message => ({ role: message.role, content: message.content }))
+        ];
+        apiResponse = await fetch(isOllama ? `${process.env.OLLAMA_URL || 'http://127.0.0.1:11434'}/v1/chat/completions` : 'https://api.openai.com/v1/chat/completions', {
+          method: 'POST', signal: controller.signal,
+          headers: { ...(isOllama ? {} : { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` }), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: isOllama ? (process.env.OLLAMA_MODEL || 'qwen3:1.7b') : (process.env.OPENAI_MODEL || 'gpt-6-astra'),
+            messages,
+            max_tokens: 800,
+            ...(isOllama ? {} : { store: false })
+          })
+        });
+      }
     } finally { clearTimeout(timeout); }
     const result = await apiResponse.json().catch(() => ({}));
     if (!apiResponse.ok) {
       if (apiResponse.status === 401 && provider === 'openai') return sendJSON(response, 502, { error: 'OpenAI rechazó la clave configurada. Revisa OPENAI_API_KEY en el servidor.' });
       if (apiResponse.status === 429 && provider === 'openai') return sendJSON(response, 429, { error: 'OpenAI limitó temporalmente las solicitudes. Revisa el uso y la facturación de la cuenta API.' });
+      if ([400, 401, 403].includes(apiResponse.status) && provider === 'gemini') return sendJSON(response, 502, { error: 'Google AI Studio rechazó la clave o no habilitó este modelo para el proyecto. Revisa GEMINI_API_KEY y el acceso al nivel gratuito.' });
+      if (apiResponse.status === 429 && provider === 'gemini') return sendJSON(response, 429, { error: 'Se alcanzó el límite gratuito temporal de Gemini. Espera un momento e inténtalo más tarde.' });
       if (isOllama && (apiResponse.status === 404 || apiResponse.status === 400)) return sendJSON(response, 503, { error: `Ollama no encuentra el modelo ${process.env.OLLAMA_MODEL || 'qwen3:1.7b'}. En PowerShell ejecuta: ollama run ${process.env.OLLAMA_MODEL || 'qwen3:1.7b'}` });
       return sendJSON(response, 502, { error: 'El servicio de IA no pudo responder. Inténtalo de nuevo en un momento.' });
     }
-    const answer = result.choices?.[0]?.message?.content || result.output_text || result.output?.flatMap(item => item.content || []).filter(item => item.type === 'output_text').map(item => item.text).join('\n');
+    const answer = result.candidates?.[0]?.content?.parts?.map(part => part.text || '').filter(Boolean).join('\n') || result.choices?.[0]?.message?.content || result.output_text || result.output?.flatMap(item => item.content || []).filter(item => item.type === 'output_text').map(item => item.text).join('\n');
     if (!answer) return sendJSON(response, 502, { error: 'El servicio de IA devolvió una respuesta vacía. Vuelve a intentarlo.' });
     return sendJSON(response, 200, { answer });
   } catch (error) {
@@ -87,8 +104,9 @@ http.createServer((request, response) => {
   try { pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname); }
   catch { response.writeHead(400).end('Solicitud no válida'); return; }
   if (request.method === 'GET' && pathname === '/api/tutor/status') {
-    const provider = (process.env.AI_PROVIDER || 'ollama').toLowerCase();
+    const provider = getAIProvider();
     if (provider === 'openai') { sendJSON(response, 200, { configured: Boolean(process.env.OPENAI_API_KEY), provider }); return; }
+    if (provider === 'gemini') { sendJSON(response, 200, { configured: Boolean(process.env.GEMINI_API_KEY), provider, model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite' }); return; }
     const model = process.env.OLLAMA_MODEL || 'qwen3:1.7b';
     fetch(`${process.env.OLLAMA_URL || 'http://127.0.0.1:11434'}/api/tags`, { signal: AbortSignal.timeout(1800) })
       .then(result => result.json()).then(data => {

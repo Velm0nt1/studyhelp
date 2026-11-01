@@ -1,15 +1,19 @@
-# Configurar el Tutor IA gratis en StudyHelp
+# Configurar el Tutor IA de StudyHelp
 
-StudyHelp viene configurado para usar Ollama con Qwen 3 de 1.7B, ejecutado localmente. No necesitas cuenta, clave API ni pagar por pregunta. El modelo se descarga en tu computadora y las consultas se procesan allí; el equipo debe permanecer encendido y Ollama abierto para usar el Tutor IA.
+## Sitio local
 
-## Preparación (solo una vez)
+StudyHelp usa Ollama con Qwen 3 de 1.7B de forma local. Instala Ollama, ejecuta `ollama run qwen3:1.7b` una vez y deja Ollama abierto. Inicia StudyHelp con `node server.js`. Las preguntas se procesan en tu computadora.
 
-1. Instala Ollama para Windows desde [ollama.com/download/windows](https://ollama.com/download/windows).
-2. Abre PowerShell y ejecuta `ollama run qwen3:1.7b`. La primera vez descarga el modelo (aprox. 1.4 GB); espera a que termine. Puedes escribir `/bye` para salir de esa conversación de prueba.
-3. Inicia StudyHelp con `node server.js` y abre `http://localhost:4173`.
-4. En Tutor IA debe aparecer “Tutor IA local listo”.
+## Sitio publicado en Render
 
-El archivo `.env.example` documenta los valores predeterminados; no hay que crear una clave. Si deseas cambiar el modelo, edita `OLLAMA_MODEL` en `.env`. Para usar una API con clave y posible costo, puedes poner `AI_PROVIDER=openai` y configurar `OPENAI_API_KEY` en el `.env` del servidor; nunca pegues la clave en la página ni la compartas en el chat.
+Render no puede acceder al Ollama que está instalado en tu computadora. Para activar el Tutor IA público, StudyHelp usa Gemini 2.5 Flash-Lite si se configura su clave:
 
-El historial de StudyHelp se guarda en este navegador. El servidor local envía las preguntas a Ollama en `127.0.0.1`; no las manda a OpenAI cuando `AI_PROVIDER=ollama`.
+1. Crea una clave en [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. En Render, abre el servicio StudyHelp y ve a **Environment → Add Environment Variable**.
+3. Añade `GEMINI_API_KEY` con el valor de la clave. La clave debe estar guardada solo en Render, nunca en GitHub ni en el navegador. El código detecta automáticamente Gemini cuando está desplegado en Render.
+4. Guarda y despliega de nuevo el servicio.
+
+Google publica un nivel gratuito para Gemini 2.5 Flash-Lite, sujeto a límites que pueden cambiar. En el nivel gratuito, Google puede usar el contenido enviado para mejorar sus productos. No escribas datos personales o confidenciales en el Tutor IA. Revisa sus respuestas, porque puede equivocarse.
+
+El historial de StudyHelp se guarda en el navegador del usuario. La clave API permanece en el servidor de Render y no se envía al navegador.
 
